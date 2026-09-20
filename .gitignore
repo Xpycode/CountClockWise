@@ -1,0 +1,6 @@
+.build/
+.fastembed_cache/
+.swiftpm/
+*.xcodeproj
+DerivedData/
+.DS_Store
