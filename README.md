@@ -1,6 +1,12 @@
-# Count Clock Wise
+<p align="center">
+  <img src="docs/assets/readme/app-icon.png" width="160" height="160" alt="Count Clock Wise app icon">
+</p>
 
-A native macOS desktop clock with independent, resizable windows. This build supports Apple silicon Macs running macOS 14 or later. Intel and macOS 13 are not supported by this release configuration.
+<h1 align="center">Count Clock Wise</h1>
+
+<p align="center">A native macOS desktop clock with independent, resizable windows.</p>
+
+Count Clock Wise supports Apple silicon Macs running macOS 14 or later. Intel and macOS 13 are not supported by this release configuration.
 
 ## Use
 
