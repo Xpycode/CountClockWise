@@ -8,6 +8,22 @@
 
 Count Clock Wise supports Apple silicon Macs running macOS 14 or later. Intel and macOS 13 are not supported by this release configuration.
 
+## Screenshots
+
+<p align="center">
+  <a href="docs/assets/readme/clock-window.png"><img src="docs/assets/readme/clock-window.png" width="49%" alt="Count Clock Wise showing local time with 25 FPS timecode"></a>
+  <a href="docs/assets/readme/countdown.png"><img src="docs/assets/readme/countdown.png" width="49%" alt="A running countdown with pause, reset and duration controls"></a>
+</p>
+
+<p align="center"><sub>Clock with frame timecode · Running countdown</sub></p>
+
+<p align="center">
+  <a href="docs/assets/readme/time-zone-settings.png"><img src="docs/assets/readme/time-zone-settings.png" width="49%" alt="Searchable offline time-zone and city settings"></a>
+  <a href="docs/assets/readme/window-settings.png"><img src="docs/assets/readme/window-settings.png" width="49%" alt="Window behavior and editable global shortcut settings"></a>
+</p>
+
+<p align="center"><sub>Offline city search and favourites · Window behavior and global shortcut</sub></p>
+
 ## Use
 
 - **File → New Clock** creates another clock. Each window remembers its own time zone, label, display and window settings.
