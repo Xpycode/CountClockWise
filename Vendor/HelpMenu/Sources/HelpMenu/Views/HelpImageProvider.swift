@@ -26,7 +26,7 @@ struct BundleImageProvider: ImageProvider {
                 .frame(maxWidth: image.size.width)
         } else {
             // Remote or unresolved → default (network) provider.
-            DefaultImageProvider().makeImage(url: url)
+            DefaultImageProvider.default.makeImage(url: url)
         }
     }
 

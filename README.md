@@ -33,7 +33,7 @@ open "build/Count Clock Wise.app"
 
 The build script creates the app icon, resource bundles and embedded Sparkle framework, then signs and verifies `build/Count Clock Wise.app`. It prefers the installed Luces Umbrarum Developer ID certificate; set `CLOCK_SIGNING_IDENTITY` to override it. This does not notarize or publish the app. Dependencies are pinned in `Package.resolved`; shared Help/Feedback/citizenship sources are vendored with provenance under `Vendor/`.
 
-`Release.plist` owns the marketing version and build number (currently 1.0 / 1001). Increment Build for every distributable build; never reuse or decrease it across published releases. Build the final artifact after the final source change.
+`Release.plist` owns the marketing version and build number (currently 1.0 / 1002). Increment Build for every distributable build; never reuse or decrease it across published releases. Build the final artifact after the final source change.
 
 Sparkle integration uses `CLOCK_FEED_URL` (HTTPS) and `CLOCK_UPDATE_PUBLIC_KEY` (base64 Ed25519 public key) at build time. Until both are configured, Check for Updates explains that the local build has no update channel and automatic checks remain off. Publishing a signed appcast and verifying an actual old-to-new update remain release gates. Never embed the private signing key.
 
