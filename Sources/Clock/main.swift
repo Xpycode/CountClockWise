@@ -14,6 +14,7 @@ final class ClockWindowController: NSWindowController, NSWindowDelegate, NSToolb
     private var preferences: PreferencesWindowController?
     private let clockToolbar = NSToolbar(identifier: "ClockToolbar")
     private var showingFocusMode = false
+    var shortcut: GlobalShortcut?
     var onClose: (() -> Void)?
 
     init(settings: Settings) {
@@ -118,7 +119,7 @@ final class ClockWindowController: NSWindowController, NSWindowDelegate, NSToolb
     @objc private func selectToolbarMode() { settings.mode = ["Clock", "Countdown", "Stopwatch"][modeControl.selectedSegment] }
 
     func showSettings() {
-        if preferences == nil { preferences = PreferencesWindowController(settings: settings) }
+        if preferences == nil { preferences = PreferencesWindowController(settings: settings, shortcut: shortcut) }
         preferences?.showWindow(nil)
         preferences?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -134,9 +135,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var keyMonitor: Any?
     private weak var lastActive: ClockWindowController?
     private let displayMenu = NSMenu(title: "Controls")
+    private var appearanceObservation: NSKeyValueObservation?
+    private var visibilityMenuItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        NSApp.appearance = AppAppearance.current.appearance
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
+            NotificationCenter.default.post(name: .appAppearanceDidChange, object: nil)
+        }
+        DiagnosticLogger.shared.record("app.started")
         buildMainMenu()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 48, event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
@@ -149,19 +157,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         NotificationCenter.default.addObserver(self, selector: #selector(refreshCommands), name: .settingsDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(refreshCommands), name: NSWindow.didBecomeMainNotification, object: nil)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "clock", accessibilityDescription: "Clock")
+        statusItem.button?.image = NSImage(systemSymbolName: "clock", accessibilityDescription: "Count Clock Wise")
         let menu = NSMenu()
         add(menu, "Show / Hide All Clocks", #selector(toggleVisibility))
         add(menu, "New Clock", #selector(newClock))
         add(menu, "Settings…", #selector(showPreferences))
-        menu.addItem(.separator()); add(menu, "Quit Clock", #selector(quit))
+        menu.addItem(.separator()); add(menu, "Quit Count Clock Wise", #selector(quit))
         statusItem.menu = menu
         shortcut = GlobalShortcut { [weak self] in self?.toggleVisibility() }
         if shortcut?.register() != true {
-            let alert = NSAlert(); alert.messageText = "Clock shortcut is unavailable"
-            alert.informativeText = "Control–Option–Command–C may be used by another app. Show and hide clocks using Clock’s menu bar icon."
+            let alert = NSAlert(); alert.messageText = "Count Clock Wise shortcut is unavailable"
+            alert.informativeText = (shortcut?.lastError ?? "The configured shortcut may be used by another app.")
+                + "\n\nShow and hide clocks using Count Clock Wise’s menu-bar icon, or change the shortcut in Settings → Window."
             alert.runModal()
         }
+        NotificationCenter.default.addObserver(self, selector: #selector(refreshShortcut), name: .globalShortcutDidChange, object: nil)
+        refreshShortcut()
+        ClockUpdater.shared.start()
         let ids = UserDefaults.standard.stringArray(forKey: "clockWindowIDs") ?? ["primary"]
         for id in ids { createClock(id: id) }
         if clocks.isEmpty { createClock(id: "primary") }
@@ -171,6 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     private func createClock(id: String) {
         let controller = ClockWindowController(settings: id == "primary" ? .shared : Settings(id: id))
+        controller.shortcut = shortcut
         controller.onClose = { [weak self, weak controller] in
             guard let self, !self.quitting, let controller else { return }
             self.clocks.removeAll { $0 === controller }
@@ -207,6 +220,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(changeAppearance(_:)), let raw = item.representedObject as? String {
+            item.state = raw == AppAppearance.current.rawValue ? .on : .off
+        }
         if item.action == #selector(toggleFocusMode) {
             item.state = activeClock?.settings.focusMode == true ? .on : .off
             return clocks.contains { $0.window === NSApp.keyWindow && $0.window?.attachedSheet == nil }
@@ -214,14 +230,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         return true
     }
     @objc private func toggleFocusMode() { activeClock?.settings.focusMode.toggle() }
-    @objc private func quit() { NSApp.terminate(nil) }
-    @objc private func about() {
-        NSApp.orderFrontStandardAboutPanel(options: [.credits: NSAttributedString(string: "Offline city data: GeoNames (CC BY 4.0).\nTime-zone country mapping: IANA (public domain).\nSee Help → Clock Help for details.")])
+    @objc private func changeAppearance(_ item: NSMenuItem) {
+        guard let raw = item.representedObject as? String, let appearance = AppAppearance(rawValue: raw) else { return }
+        AppAppearance.current = appearance
     }
-    @objc private func help() {
-        let alert = NSAlert(); alert.messageText = "Clock"
-        alert.informativeText = "Create independent clocks with File → New Clock. Use the Controls menu or right-click a clock to change mode, start/pause/reset timers, or set a countdown.\n\nSettings apply to the selected clock. Borderless clocks can be dragged anywhere; right-click to restore the title bar. Control–Option–Command–C shows/hides all clocks.\n\nFractional frame timecode counts continuously from local midnight (or timer start). NDF differs from wall time; DF skips frame numbers at minute boundaries. This is a display, not an LTC/MTC synchronization source.\n\nCity data: geonames.org, CC BY 4.0 (creativecommons.org/licenses/by/4.0/). Includes cities above 15,000 population and capitals."
-        alert.runModal()
+    @objc private func refreshShortcut() {
+        // Filled from the same persisted binding as the global registration.
+        visibilityMenuItem?.keyEquivalent = shortcut?.configuration?.keyEquivalent ?? ""
+        visibilityMenuItem?.keyEquivalentModifierMask = shortcut?.configuration?.cocoaModifiers ?? []
+    }
+    @objc private func showDiagnosticLog() {
+        DiagnosticLogger.shared.record("diagnostics.revealRequested")
+        if let failure = DiagnosticLogger.shared.lastFailure {
+            let alert = NSAlert(); alert.messageText = "Diagnostic log unavailable"; alert.informativeText = failure
+            alert.runModal()
+        } else { NSWorkspace.shared.activateFileViewerSelecting([DiagnosticLogger.shared.logURL]) }
+    }
+    @objc private func quit() { NSApp.terminate(nil) }
+    @MainActor @objc private func about() {
+        ClockSupport.shared.showAbout()
+    }
+    @MainActor @objc private func help() {
+        ClockSupport.shared.showHelp()
     }
     @objc private func refreshCommands() {
         menuNeedsUpdate(displayMenu)
@@ -242,23 +272,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.target = target ?? self; menu.addItem(item)
     }
-    private func buildMainMenu() {
+    @MainActor private func buildMainMenu() {
         let main = NSMenu()
         func submenu(_ name: String) -> NSMenu {
             let item = NSMenuItem(title: name, action: nil, keyEquivalent: "")
             let menu = NSMenu(title: name); item.submenu = menu; main.addItem(item); return menu
         }
-        let app = submenu("Clock")
-        add(app, "About Clock", #selector(about)); app.addItem(.separator())
+        let app = submenu("Count Clock Wise")
+        add(app, "About Count Clock Wise", #selector(about)); app.addItem(.separator())
+        add(app, "Check for Updates…", #selector(ClockUpdater.checkForUpdates(_:)), target: ClockUpdater.shared)
         add(app, "Settings…", #selector(showPreferences), ",")
         let services = NSMenu(title: "Services")
         let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: ""); servicesItem.submenu = services
         app.addItem(servicesItem); NSApp.servicesMenu = services; app.addItem(.separator())
-        add(app, "Hide Clock", #selector(NSApplication.hide(_:)), "h", target: NSApp)
+        add(app, "Hide Count Clock Wise", #selector(NSApplication.hide(_:)), "h", target: NSApp)
         let others = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         others.keyEquivalentModifierMask = [.command, .option]; others.target = NSApp; app.addItem(others)
         add(app, "Show All", #selector(NSApplication.unhideAllApplications(_:)), target: NSApp)
-        app.addItem(.separator()); add(app, "Quit Clock", #selector(quit), "q")
+        app.addItem(.separator()); add(app, "Quit Count Clock Wise", #selector(quit), "q")
         let file = submenu("File"); add(file, "New Clock", #selector(newClock), "n")
         let close = NSMenuItem(title: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"); file.addItem(close)
         let edit = submenu("Edit")
@@ -269,20 +300,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         add(view, "Clock-Only View", #selector(toggleFocusMode), "\t")
         view.items.last?.keyEquivalentModifierMask = []
         add(view, "Show / Hide All Clocks", #selector(toggleVisibility), "c")
-        view.items.last?.keyEquivalentModifierMask = [.control, .option, .command]
+        visibilityMenuItem = view.items.last
         view.addItem(NSMenuItem(title: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f"))
         view.items.last?.keyEquivalentModifierMask = [.control, .command]
         let clockItem = NSMenuItem(title: "Controls", action: nil, keyEquivalent: ""); clockItem.submenu = displayMenu
         displayMenu.delegate = self; main.addItem(clockItem)
+        let appearance = submenu("Appearance")
+        for choice in AppAppearance.allCases {
+            add(appearance, choice.title, #selector(changeAppearance(_:)))
+            appearance.items.last?.representedObject = choice.rawValue
+        }
         let windows = submenu("Window"); NSApp.windowsMenu = windows
         windows.addItem(NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
         windows.addItem(NSMenuItem(title: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: ""))
         add(windows, "Bring All to Front", #selector(NSApplication.arrangeInFront(_:)), target: NSApp)
-        let helpMenu = submenu("Help"); add(helpMenu, "Clock Help", #selector(help)); NSApp.helpMenu = helpMenu
+        let helpMenu = submenu("Help")
+        add(helpMenu, "Count Clock Wise Help", #selector(help), "?")
+        helpMenu.addItem(.separator())
+        add(helpMenu, "Send Feedback…", #selector(ClockSupport.sendFeedback), target: ClockSupport.shared)
+        add(helpMenu, "Email Support…", #selector(ClockSupport.emailSupport), target: ClockSupport.shared)
+        add(helpMenu, "Show Diagnostic Log", #selector(showDiagnosticLog))
+        helpMenu.addItem(.separator())
+        add(helpMenu, "Leave a Tip", #selector(ClockSupport.leaveTip), target: ClockSupport.shared)
+        NSApp.helpMenu = helpMenu
         NSApp.mainMenu = main
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-    func applicationWillTerminate(_ notification: Notification) { quitting = true; persistWindows() }
+    func applicationWillTerminate(_ notification: Notification) {
+        quitting = true; persistWindows()
+        DiagnosticLogger.shared.record("app.terminating")
+        _ = DiagnosticLogger.shared.lastFailure
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { toggleVisibility() }; return true
     }

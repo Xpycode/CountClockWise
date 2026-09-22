@@ -29,6 +29,7 @@ final class ClockView: NSView, NSMenuItemValidation {
         NotificationCenter.default.addObserver(
             self, selector: #selector(applySettings), name: .settingsDidChange, object: settings
         )
+        NotificationCenter.default.addObserver(self, selector: #selector(applySettings), name: .appAppearanceDidChange, object: nil)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -148,6 +149,9 @@ final class ClockView: NSView, NSMenuItemValidation {
         let rgb = s.backgroundColor.usingColorSpace(.sRGB) ?? .black
         let brightness = 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
         appearance = NSAppearance(named: brightness < 0.5 ? .darkAqua : .aqua)
+        controlsBar.appearance = NSApp.effectiveAppearance
+        for button in [startButton, resetButton, durationButton] { button.appearance = NSApp.effectiveAppearance }
+        modeSelector.appearance = NSApp.effectiveAppearance
         timeLabel.textColor = s.textColor
         zoneLabel.font = .systemFont(ofSize: 11)
         zoneLabel.appearance = NSApp.effectiveAppearance

@@ -4,22 +4,26 @@ import ServiceManagement
 final class PreferencesWindowController: NSWindowController {
     static let shared = PreferencesWindowController(settings: .shared)
     private var settings: Settings = .shared
+    private var shortcut: GlobalShortcut?
 
-    convenience init(settings: Settings) {
+    convenience init(settings: Settings, shortcut: GlobalShortcut? = nil) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 620, height: 420),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Clock Preferences"
+        window.title = "Count Clock Wise Preferences"
         window.center()
         self.init(window: window)
         self.settings = settings
+        self.shortcut = shortcut
         buildUI()
         refreshDisplayControls()
         NotificationCenter.default.addObserver(self, selector: #selector(refreshDisplayControls),
                                                name: .settingsDidChange, object: settings)
+        NotificationCenter.default.addObserver(self, selector: #selector(refreshDisplayControls),
+                                               name: .appAppearanceDidChange, object: nil)
     }
 
     private func buildUI() {
@@ -30,6 +34,7 @@ final class PreferencesWindowController: NSWindowController {
         tabView.addTabViewItem(timeZoneTab())
         tabView.addTabViewItem(appearanceTab())
         tabView.addTabViewItem(windowTab())
+        tabView.addTabViewItem(updatesTab())
 
         let contentView = NSView()
         contentView.addSubview(tabView)
@@ -110,6 +115,9 @@ final class PreferencesWindowController: NSWindowController {
         spacesCheckbox.state = s.allSpaces ? .on : .off
         opacitySlider.doubleValue = s.opacity
         opacityLabel.stringValue = "\(Int(s.opacity * 100))%"
+        appearancePopup.selectItem(at: AppAppearance.allCases.firstIndex(of: .current) ?? 0)
+        backgroundColorWell.color = s.backgroundColor
+        textColorWell.color = s.textColor
     }
 
     // MARK: - Time Zone
@@ -125,11 +133,18 @@ final class PreferencesWindowController: NSWindowController {
 
     private var backgroundColorWell: NSColorWell!
     private var textColorWell: NSColorWell!
+    private var appearancePopup: NSPopUpButton!
 
     private func appearanceTab() -> NSTabViewItem {
         let s = settings
         let item = NSTabViewItem(identifier: "appearance")
         item.label = "Appearance"
+
+        appearancePopup = NSPopUpButton()
+        appearancePopup.addItems(withTitles: AppAppearance.allCases.map(\.title))
+        appearancePopup.selectItem(at: AppAppearance.allCases.firstIndex(of: .current) ?? 0)
+        appearancePopup.target = self
+        appearancePopup.action = #selector(appearanceChanged)
 
         backgroundColorWell = NSColorWell()
         backgroundColorWell.color = s.backgroundColor
@@ -144,12 +159,20 @@ final class PreferencesWindowController: NSWindowController {
         let bgRow = labeledRow("Background color:", backgroundColorWell)
         let textRow = labeledRow("Text color:", textColorWell)
 
-        item.view = wrapped(verticalStack([bgRow, textRow]))
+        let hint = NSTextField(wrappingLabelWithString: "App appearance applies to all windows and controls. Clock colors apply only to the selected clock.")
+        hint.font = .systemFont(ofSize: 11)
+        hint.textColor = .secondaryLabelColor
+        hint.preferredMaxLayoutWidth = 500
+        item.view = wrapped(verticalStack([labeledRow("App appearance:", appearancePopup), bgRow, textRow, hint]))
         return item
     }
 
     @objc private func backgroundColorChanged() { settings.backgroundColor = backgroundColorWell.color }
     @objc private func textColorChanged() { settings.textColor = textColorWell.color }
+    @objc private func appearanceChanged() {
+        guard AppAppearance.allCases.indices.contains(appearancePopup.indexOfSelectedItem) else { return }
+        AppAppearance.current = AppAppearance.allCases[appearancePopup.indexOfSelectedItem]
+    }
 
     // MARK: - Window
 
@@ -176,17 +199,40 @@ final class PreferencesWindowController: NSWindowController {
         opacitySlider = NSSlider(value: s.opacity, minValue: 0.2, maxValue: 1, target: self, action: #selector(opacityChanged))
         opacitySlider.widthAnchor.constraint(equalToConstant: 220).isActive = true
         opacityLabel = NSTextField(labelWithString: "\(Int(s.opacity * 100))%")
-        let hint = NSTextField(wrappingLabelWithString: "Show/hide all clocks: Control–Option–Command–C. Login launch applies to the whole app. Keep Clock.app in a stable location, such as Applications.")
+        let hint = NSTextField(wrappingLabelWithString: "The global shortcut and login launch apply to the whole app. Keep Count Clock Wise.app in a stable location, such as Applications.")
         hint.textColor = .secondaryLabelColor; hint.font = .systemFont(ofSize: 11)
         hint.preferredMaxLayoutWidth = 500
-        item.view = wrapped(verticalStack([alwaysOnTopCheckbox, borderlessCheckbox, spacesCheckbox,
-            labeledRow("Opacity:", NSStackView(views: [opacitySlider, opacityLabel])), rememberFrameCheckbox, launchAtLoginCheckbox, hint]))
+        var rows: [NSView] = [alwaysOnTopCheckbox, borderlessCheckbox, spacesCheckbox,
+            labeledRow("Opacity:", NSStackView(views: [opacitySlider, opacityLabel])), rememberFrameCheckbox, launchAtLoginCheckbox]
+        if let shortcut { rows.append(ShortcutPreferencesView(shortcut: shortcut)) }
+        rows.append(hint)
+        item.view = wrapped(verticalStack(rows))
         return item
     }
 
     @objc private func borderlessChanged() { settings.borderless = borderlessCheckbox.state == .on }
     @objc private func spacesChanged() { settings.allSpaces = spacesCheckbox.state == .on }
     @objc private func opacityChanged() { settings.opacity = opacitySlider.doubleValue }
+
+    private var automaticUpdatesCheckbox: NSButton!
+    private func updatesTab() -> NSTabViewItem {
+        let item = NSTabViewItem(identifier: "updates")
+        item.label = "Updates"
+        automaticUpdatesCheckbox = checkbox("Automatically check for updates", isOn: ClockUpdater.shared.automaticallyChecks, action: #selector(automaticUpdatesChanged))
+        automaticUpdatesCheckbox.isEnabled = ClockUpdater.shared.isConfigured
+        let check = NSButton(title: "Check for Updates…", target: ClockUpdater.shared, action: #selector(ClockUpdater.checkForUpdates(_:)))
+        check.bezelStyle = .rounded
+        let note = NSTextField(wrappingLabelWithString: ClockUpdater.shared.isConfigured
+            ? "Count Clock Wise checks for signed releases. You choose when to install an update."
+            : "Updates will become available when the public release channel is ready. This build is for local testing.")
+        note.preferredMaxLayoutWidth = 500
+        note.textColor = .secondaryLabelColor
+        item.view = wrapped(verticalStack([automaticUpdatesCheckbox, check, note]))
+        return item
+    }
+    @objc private func automaticUpdatesChanged() {
+        ClockUpdater.shared.automaticallyChecks = automaticUpdatesCheckbox.state == .on
+    }
 
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
@@ -201,7 +247,7 @@ final class PreferencesWindowController: NSWindowController {
         do {
             if enabled {
                 guard Bundle.main.bundleIdentifier == "com.lucesumbrarum.Clock" else {
-                    throw NSError(domain: "Clock", code: 1, userInfo: [NSLocalizedDescriptionKey: "Open the packaged Clock.app to enable Launch at Login."])
+                    throw NSError(domain: "Clock", code: 1, userInfo: [NSLocalizedDescriptionKey: "Open the packaged Count Clock Wise.app to enable Launch at Login."])
                 }
                 try SMAppService.mainApp.register()
                 if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
@@ -210,6 +256,7 @@ final class PreferencesWindowController: NSWindowController {
             }
             launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
         } catch {
+            DiagnosticLogger.shared.record("login.registration.failed", error: error)
             launchAtLoginCheckbox.state = enabled ? .off : .on
             let alert = NSAlert()
             alert.messageText = "Couldn't update Login Item"
@@ -257,7 +304,7 @@ final class PreferencesWindowController: NSWindowController {
 extension PreferencesWindowController: NSTabViewDelegate {
     func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
         let identifier = tabViewItem?.identifier as? String
-        let height: CGFloat = identifier == "timezone" ? 460 : (identifier == "appearance" ? 190 : (identifier == "window" ? 390 : 420))
+        let height: CGFloat = identifier == "timezone" ? 460 : (identifier == "appearance" ? 280 : (identifier == "window" ? 510 : 420))
         guard let window else { return }
         let oldTop = window.frame.maxY
         var frame = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 620, height: height))

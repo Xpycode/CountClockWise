@@ -1,0 +1,11 @@
+{
+  "windowTitle": "Count Clock Wise Help",
+  "topics": [
+    { "id": "start", "title": "Clocks and Windows", "markdownFile": "clocks.md", "group": "Getting Started" },
+    { "id": "timers", "title": "Countdown and Stopwatch", "markdownFile": "timers.md", "group": "Getting Started" },
+    { "id": "appearance", "title": "Appearance and Compact View", "markdownFile": "appearance.md", "group": "Customization" },
+    { "id": "shortcuts", "title": "Keyboard Shortcuts", "markdownFile": "shortcuts.md", "group": "Customization" },
+    { "id": "timecode", "title": "Frame Timecode", "markdownFile": "timecode.md", "group": "Reference" },
+    { "id": "support", "title": "Updates, Privacy and Support", "markdownFile": "support.md", "group": "Reference" }
+  ]
+}
