@@ -4,3 +4,5 @@
 *.xcodeproj
 DerivedData/
 .DS_Store
+
+build/

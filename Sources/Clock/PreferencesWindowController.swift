@@ -2,11 +2,12 @@ import Cocoa
 import ServiceManagement
 
 final class PreferencesWindowController: NSWindowController {
-    static let shared = PreferencesWindowController()
+    static let shared = PreferencesWindowController(settings: .shared)
+    private var settings: Settings = .shared
 
-    private convenience init() {
+    convenience init(settings: Settings) {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 420),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -14,11 +15,16 @@ final class PreferencesWindowController: NSWindowController {
         window.title = "Clock Preferences"
         window.center()
         self.init(window: window)
+        self.settings = settings
         buildUI()
+        refreshDisplayControls()
+        NotificationCenter.default.addObserver(self, selector: #selector(refreshDisplayControls),
+                                               name: .settingsDidChange, object: settings)
     }
 
     private func buildUI() {
         let tabView = NSTabView()
+        tabView.delegate = self
         tabView.translatesAutoresizingMaskIntoConstraints = false
         tabView.addTabViewItem(displayTab())
         tabView.addTabViewItem(timeZoneTab())
@@ -41,11 +47,14 @@ final class PreferencesWindowController: NSWindowController {
     private var use24HourCheckbox: NSButton!
     private var showSecondsCheckbox: NSButton!
     private var showDateCheckbox: NSButton!
-    private var fontSizeSlider: NSSlider!
-    private var fontSizeValueLabel: NSTextField!
+    private var showTimeZoneCheckbox: NSButton!
+    private var showStatusCheckbox: NSButton!
+    private var showControlsCheckbox: NSButton!
+    private var showFramesCheckbox: NSButton!
+    private var frameRatePopup: NSPopUpButton!
 
     private func displayTab() -> NSTabViewItem {
-        let s = Settings.shared
+        let s = settings
         let item = NSTabViewItem(identifier: "display")
         item.label = "Display"
 
@@ -53,64 +62,63 @@ final class PreferencesWindowController: NSWindowController {
         showSecondsCheckbox = checkbox("Show seconds", isOn: s.showSeconds, action: #selector(showSecondsChanged))
         showDateCheckbox = checkbox("Show date", isOn: s.showDate, action: #selector(showDateChanged))
 
-        fontSizeSlider = NSSlider(value: s.fontSize, minValue: 40, maxValue: 300, target: self, action: #selector(fontSizeChanged))
-        fontSizeSlider.translatesAutoresizingMaskIntoConstraints = false
-        fontSizeSlider.widthAnchor.constraint(equalToConstant: 200).isActive = true
-        fontSizeValueLabel = NSTextField(labelWithString: "\(Int(s.fontSize))pt")
-        fontSizeValueLabel.translatesAutoresizingMaskIntoConstraints = false
-        fontSizeValueLabel.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        showStatusCheckbox = checkbox("Show status bar (date, time zone and FPS)", isOn: s.showStatusBar, action: #selector(showStatusChanged))
+        showControlsCheckbox = checkbox("Show mode selector and timer buttons", isOn: s.showControls, action: #selector(showControlsChanged))
+        showTimeZoneCheckbox = checkbox("Show time zone", isOn: s.showTimeZone, action: #selector(showTimeZoneChanged))
+        showFramesCheckbox = checkbox("Show frames (includes seconds)", isOn: s.showFrames, action: #selector(showFramesChanged))
+        frameRatePopup = NSPopUpButton()
+        frameRatePopup.addItems(withTitles: FrameRate.all.map(\.title))
+        frameRatePopup.selectItem(at: FrameRate.all.firstIndex(of: s.frameRate)!)
+        frameRatePopup.target = self
+        frameRatePopup.action = #selector(frameRateChanged)
 
-        let sliderRow = NSStackView(views: [NSTextField(labelWithString: "Clock size:"), fontSizeSlider, fontSizeValueLabel])
-        sliderRow.orientation = .horizontal
-        sliderRow.spacing = 8
-
-        item.view = wrapped(verticalStack([use24HourCheckbox, showSecondsCheckbox, showDateCheckbox, sliderRow]))
+        let hint = NSTextField(wrappingLabelWithString: "Frames use 24-hour timecode. Fractional NDF runs slightly behind wall time; DF corrects this by skipping frame numbers. Choose Clock, Countdown or Stopwatch in the Controls menu.")
+        hint.font = .systemFont(ofSize: 11); hint.textColor = .secondaryLabelColor
+        hint.preferredMaxLayoutWidth = 500
+        item.view = wrapped(verticalStack([use24HourCheckbox, showSecondsCheckbox, showDateCheckbox, showTimeZoneCheckbox, showStatusCheckbox, showControlsCheckbox, showFramesCheckbox, labeledRow("Frame rate:", frameRatePopup), hint]))
         return item
     }
 
-    @objc private func use24HourChanged() { Settings.shared.use24Hour = use24HourCheckbox.state == .on }
-    @objc private func showSecondsChanged() { Settings.shared.showSeconds = showSecondsCheckbox.state == .on }
-    @objc private func showDateChanged() { Settings.shared.showDate = showDateCheckbox.state == .on }
+    @objc private func use24HourChanged() { settings.use24Hour = use24HourCheckbox.state == .on }
+    @objc private func showSecondsChanged() { settings.showSeconds = showSecondsCheckbox.state == .on }
+    @objc private func showDateChanged() { settings.showDate = showDateCheckbox.state == .on }
 
-    @objc private func fontSizeChanged() {
-        let value = fontSizeSlider.doubleValue
-        Settings.shared.fontSize = value
-        fontSizeValueLabel.stringValue = "\(Int(value))pt"
+    @objc private func showStatusChanged() { settings.showStatusBar = showStatusCheckbox.state == .on }
+    @objc private func showControlsChanged() { settings.showControls = showControlsCheckbox.state == .on }
+    @objc private func showTimeZoneChanged() { settings.showTimeZone = showTimeZoneCheckbox.state == .on }
+    @objc private func showFramesChanged() { settings.showFrames = showFramesCheckbox.state == .on }
+    @objc private func frameRateChanged() {
+        settings.frameRate = FrameRate.all[frameRatePopup.indexOfSelectedItem]
+    }
+
+    @objc private func refreshDisplayControls() {
+        let s = settings
+        use24HourCheckbox.state = s.use24Hour ? .on : .off
+        use24HourCheckbox.isEnabled = s.mode == "Clock" && !s.showFrames
+        showSecondsCheckbox.isEnabled = s.mode == "Clock"
+        showDateCheckbox.isEnabled = s.mode == "Clock"
+        showTimeZoneCheckbox.isEnabled = s.mode == "Clock"
+        showSecondsCheckbox.state = s.showSeconds ? .on : .off
+        showDateCheckbox.state = s.showDate ? .on : .off
+        showTimeZoneCheckbox.state = s.showTimeZone ? .on : .off
+        showStatusCheckbox.state = s.showStatusBar ? .on : .off
+        showControlsCheckbox.state = s.showControls ? .on : .off
+        showFramesCheckbox.state = s.showFrames ? .on : .off
+        frameRatePopup.selectItem(at: FrameRate.all.firstIndex(of: s.frameRate)!)
+        alwaysOnTopCheckbox.state = s.alwaysOnTop ? .on : .off
+        borderlessCheckbox.state = s.borderless ? .on : .off
+        spacesCheckbox.state = s.allSpaces ? .on : .off
+        opacitySlider.doubleValue = s.opacity
+        opacityLabel.stringValue = "\(Int(s.opacity * 100))%"
     }
 
     // MARK: - Time Zone
 
-    private var timeZoneCombo: NSComboBox!
-
     private func timeZoneTab() -> NSTabViewItem {
         let item = NSTabViewItem(identifier: "timezone")
         item.label = "Time Zone"
-
-        let identifiers = TimeZone.knownTimeZoneIdentifiers.sorted()
-        timeZoneCombo = NSComboBox()
-        timeZoneCombo.translatesAutoresizingMaskIntoConstraints = false
-        timeZoneCombo.widthAnchor.constraint(equalToConstant: 300).isActive = true
-        timeZoneCombo.completes = true
-        timeZoneCombo.addItems(withObjectValues: identifiers)
-        timeZoneCombo.stringValue = Settings.shared.timeZoneIdentifier
-        timeZoneCombo.target = self
-        timeZoneCombo.action = #selector(timeZoneChanged)
-        timeZoneCombo.delegate = self
-
-        let hint = NSTextField(wrappingLabelWithString: "Start typing a city or region, e.g. \"Berlin\", \"New_York\", \"Tokyo\". CEST = Europe/Berlin (or any other Central European city) in summer.")
-        hint.textColor = .secondaryLabelColor
-        hint.font = NSFont.systemFont(ofSize: 11)
-        hint.preferredMaxLayoutWidth = 300
-
-        item.view = wrapped(verticalStack([timeZoneCombo, hint]))
+        item.view = TimeZonePickerView(settings: settings)
         return item
-    }
-
-    @objc private func timeZoneChanged() {
-        let candidate = timeZoneCombo.stringValue
-        if TimeZone(identifier: candidate) != nil {
-            Settings.shared.timeZoneIdentifier = candidate
-        }
     }
 
     // MARK: - Appearance
@@ -119,7 +127,7 @@ final class PreferencesWindowController: NSWindowController {
     private var textColorWell: NSColorWell!
 
     private func appearanceTab() -> NSTabViewItem {
-        let s = Settings.shared
+        let s = settings
         let item = NSTabViewItem(identifier: "appearance")
         item.label = "Appearance"
 
@@ -140,17 +148,21 @@ final class PreferencesWindowController: NSWindowController {
         return item
     }
 
-    @objc private func backgroundColorChanged() { Settings.shared.backgroundColor = backgroundColorWell.color }
-    @objc private func textColorChanged() { Settings.shared.textColor = textColorWell.color }
+    @objc private func backgroundColorChanged() { settings.backgroundColor = backgroundColorWell.color }
+    @objc private func textColorChanged() { settings.textColor = textColorWell.color }
 
     // MARK: - Window
 
     private var alwaysOnTopCheckbox: NSButton!
     private var rememberFrameCheckbox: NSButton!
     private var launchAtLoginCheckbox: NSButton!
+    private var borderlessCheckbox: NSButton!
+    private var spacesCheckbox: NSButton!
+    private var opacitySlider: NSSlider!
+    private var opacityLabel: NSTextField!
 
     private func windowTab() -> NSTabViewItem {
-        let s = Settings.shared
+        let s = settings
         let item = NSTabViewItem(identifier: "window")
         item.label = "Window"
 
@@ -158,27 +170,45 @@ final class PreferencesWindowController: NSWindowController {
         rememberFrameCheckbox = checkbox("Remember window size & position", isOn: s.rememberWindowFrame, action: #selector(rememberFrameChanged))
         launchAtLoginCheckbox = checkbox("Launch at login", isOn: s.launchAtLogin, action: #selector(launchAtLoginChanged))
 
-        let hint = NSTextField(wrappingLabelWithString: "Launch at login only takes effect once Clock.app is installed in /Applications (not when run via \"swift run\").")
-        hint.textColor = .secondaryLabelColor
-        hint.font = NSFont.systemFont(ofSize: 11)
-        hint.preferredMaxLayoutWidth = 300
-
-        item.view = wrapped(verticalStack([alwaysOnTopCheckbox, rememberFrameCheckbox, launchAtLoginCheckbox, hint]))
+        launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        borderlessCheckbox = checkbox("Borderless (drag anywhere; right-click to restore)", isOn: s.borderless, action: #selector(borderlessChanged))
+        spacesCheckbox = checkbox("Show on all Spaces and over full-screen apps", isOn: s.allSpaces, action: #selector(spacesChanged))
+        opacitySlider = NSSlider(value: s.opacity, minValue: 0.2, maxValue: 1, target: self, action: #selector(opacityChanged))
+        opacitySlider.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        opacityLabel = NSTextField(labelWithString: "\(Int(s.opacity * 100))%")
+        let hint = NSTextField(wrappingLabelWithString: "Show/hide all clocks: Control–Option–Command–C. Login launch applies to the whole app. Keep Clock.app in a stable location, such as Applications.")
+        hint.textColor = .secondaryLabelColor; hint.font = .systemFont(ofSize: 11)
+        hint.preferredMaxLayoutWidth = 500
+        item.view = wrapped(verticalStack([alwaysOnTopCheckbox, borderlessCheckbox, spacesCheckbox,
+            labeledRow("Opacity:", NSStackView(views: [opacitySlider, opacityLabel])), rememberFrameCheckbox, launchAtLoginCheckbox, hint]))
         return item
     }
 
-    @objc private func alwaysOnTopChanged() { Settings.shared.alwaysOnTop = alwaysOnTopCheckbox.state == .on }
-    @objc private func rememberFrameChanged() { Settings.shared.rememberWindowFrame = rememberFrameCheckbox.state == .on }
+    @objc private func borderlessChanged() { settings.borderless = borderlessCheckbox.state == .on }
+    @objc private func spacesChanged() { settings.allSpaces = spacesCheckbox.state == .on }
+    @objc private func opacityChanged() { settings.opacity = opacitySlider.doubleValue }
+
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    }
+
+    @objc private func alwaysOnTopChanged() { settings.alwaysOnTop = alwaysOnTopCheckbox.state == .on }
+    @objc private func rememberFrameChanged() { settings.rememberWindowFrame = rememberFrameCheckbox.state == .on }
 
     @objc private func launchAtLoginChanged() {
         let enabled = launchAtLoginCheckbox.state == .on
         do {
             if enabled {
+                guard Bundle.main.bundleIdentifier == "com.lucesumbrarum.Clock" else {
+                    throw NSError(domain: "Clock", code: 1, userInfo: [NSLocalizedDescriptionKey: "Open the packaged Clock.app to enable Launch at Login."])
+                }
                 try SMAppService.mainApp.register()
+                if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
             } else {
                 try SMAppService.mainApp.unregister()
             }
-            Settings.shared.launchAtLogin = enabled
+            launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
         } catch {
             launchAtLoginCheckbox.state = enabled ? .off : .on
             let alert = NSAlert()
@@ -224,8 +254,14 @@ final class PreferencesWindowController: NSWindowController {
     }
 }
 
-extension PreferencesWindowController: NSComboBoxDelegate {
-    func comboBoxWillDismiss(_ notification: Notification) {
-        timeZoneChanged()
+extension PreferencesWindowController: NSTabViewDelegate {
+    func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
+        let identifier = tabViewItem?.identifier as? String
+        let height: CGFloat = identifier == "timezone" ? 460 : (identifier == "appearance" ? 190 : (identifier == "window" ? 390 : 420))
+        guard let window else { return }
+        let oldTop = window.frame.maxY
+        var frame = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 620, height: height))
+        frame.origin = NSPoint(x: window.frame.minX, y: oldTop - frame.height)
+        window.setFrame(frame, display: true, animate: window.isVisible)
     }
 }

@@ -5,6 +5,7 @@ let package = Package(
     name: "Clock",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "Clock", path: "Sources/Clock")
+        .testTarget(name: "ClockTests", dependencies: ["Clock"]),
+        .executableTarget(name: "Clock", path: "Sources/Clock", resources: [.copy("Resources/zone.tab"), .copy("Resources/cities.json")])
     ]
 )
